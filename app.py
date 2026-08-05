@@ -1,10 +1,5 @@
-import os
-
-DB_URL = os.environ.get("DATABASE_URL")
-
+import sqlite3
 from flask import Flask, render_template_string, request, redirect, url_for, send_file, flash
-import psycopg2
-import psycopg2.extras
 import io
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -14,20 +9,17 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 app = Flask(__name__)
 app.secret_key = "hikmah_secret_key"
 
-# Apne Supabase / PostgreSQL ka Database URL yahan daalein
-
-
 def get_db():
-    conn = psycopg2.connect(DB_URL)
+    conn = sqlite3.connect('database.db')
+    conn.row_factory = sqlite3.Row
     return conn
 
-# Database Table Setup
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS students (
-            id SERIAL PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             sport TEXT NOT NULL,
             amount REAL NOT NULL,
@@ -110,8 +102,9 @@ HTML_TEMPLATE = """
                     <option value="Cricket">Cricket</option>
                     <option value="Football">Football</option>
                     <option value="Karate">Karate</option>
+                    <option value="Basketball">Basketball</option>
                 </select>
-                <button type="submit" class="btn btn-purple btn-dark">Filter</button>
+                <button type="submit" class="btn btn-dark">Filter</button>
             </form>
             <a href="/pdf-group?filter_sport={{ request.args.get('filter_sport', '') }}" class="btn btn-danger">Group PDF</a>
         </div>
@@ -155,9 +148,9 @@ HTML_TEMPLATE = """
 def index():
     filter_sport = request.args.get('filter_sport', '')
     conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cursor = conn.cursor()
     if filter_sport:
-        cursor.execute("SELECT * FROM students WHERE sport ILIKE %s ORDER BY id DESC", (filter_sport,))
+        cursor.execute("SELECT * FROM students WHERE sport LIKE ? ORDER BY id DESC", (f"%{filter_sport}%",))
     else:
         cursor.execute("SELECT * FROM students ORDER BY id DESC")
     students = cursor.fetchall()
@@ -178,7 +171,7 @@ def add():
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO students (name, sport, amount, entry_date, month, status)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (?, ?, ?, ?, ?, ?)
     """, (name, sport, amount, entry_date, month, status))
     conn.commit()
     cursor.close()
@@ -189,11 +182,91 @@ def add():
 def delete(id):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM students WHERE id = %s", (id,))
+    cursor.execute("DELETE FROM students WHERE id = ?", (id,))
     conn.commit()
     cursor.close()
     conn.close()
     return redirect(url_for('index'))
+
+@app.route('/pdf-single/<int:id>')
+def pdf_single(id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM students WHERE id = ?", (id,))
+    student = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not student:
+        return "Record not found", 404
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    elements.append(Paragraph("<b>Hikmah Sports Academy - Fee Receipt</b>", styles['Title']))
+    elements.append(Spacer(1, 20))
+
+    data = [
+        ["Receipt ID:", str(student['id'])],
+        ["Student Name:", student['name']],
+        ["Sport:", student['sport']],
+        ["Amount Paid:", f"₹{student['amount']}"],
+        ["Date:", student['entry_date']],
+        ["Month:", student['month']],
+        ["Status:", student['status']]
+    ]
+
+    t = Table(data, colWidths=[150, 250])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 8),
+    ]))
+    elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=f"receipt_{student['id']}.pdf", mimetype='application/pdf')
+
+@app.route('/pdf-group')
+def pdf_group():
+    filter_sport = request.args.get('filter_sport', '')
+    conn = get_db()
+    cursor = conn.cursor()
+    if filter_sport:
+        cursor.execute("SELECT * FROM students WHERE sport LIKE ? ORDER BY id DESC", (f"%{filter_sport}%",))
+    else:
+        cursor.execute("SELECT * FROM students ORDER BY id DESC")
+    students = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    title_text = f"Hikmah Sports Academy Report - {filter_sport}" if filter_sport else "Hikmah Sports Academy Report - All Students"
+    elements.append(Paragraph(f"<b>{title_text}</b>", styles['Title']))
+    elements.append(Spacer(1, 20))
+
+    data = [["ID", "Name", "Sport", "Amount", "Date", "Status"]]
+    for s in students:
+        data.append([str(s['id']), s['name'], s['sport'], f"₹{s['amount']}", s['entry_date'], s['status']])
+
+    t = Table(data, colWidths=[40, 110, 80, 70, 80, 70])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 6),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+    ]))
+    elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name="students_report.pdf", mimetype='application/pdf')
 
 if __name__ == '__main__':
     init_db()
