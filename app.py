@@ -11,7 +11,7 @@ app = Flask(__name__)
 app.secret_key = "hikmah_secret_key"
 
 # Apne Supabase / PostgreSQL ka Database URL yahan daalein
-postgresql://postgres:Rukh002015@db.szujlftvsoedapkbihit.supabase.co:5432/postgres
+"postgresql://postgres:Rukh002015@db.szujlftvsoedapkbihit.supabase.co:5432/postgres"
 
 def get_db():
     conn = psycopg2.connect(DB_URL)
