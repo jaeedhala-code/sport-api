@@ -1,3 +1,7 @@
+import os
+
+DB_URL = os.environ.get("DATABASE_URL")
+
 from flask import Flask, render_template_string, request, redirect, url_for, send_file, flash
 import psycopg2
 import psycopg2.extras
@@ -11,7 +15,7 @@ app = Flask(__name__)
 app.secret_key = "hikmah_secret_key"
 
 # Apne Supabase / PostgreSQL ka Database URL yahan daalein
-DB_URL ="postgresql://postgres:Rukh002015@db.szujlftvsoedapkbihit.supabase.co:5432/postgres"
+
 
 def get_db():
     conn = psycopg2.connect(DB_URL)
